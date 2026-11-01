@@ -34,3 +34,33 @@
 7. 单卡有效吞吐与密度测清后，再增加GPU数量分片任务。卡多不自动让同一个物理世界更快。
 
 [安装与命令](README.md) · [液体/视觉参数矩阵](docs/liquid-and-vision.md) · [交给其他agent的执行流程](docs/agent-playbook.md)
+
+## 从零安装与重复运行
+
+尚未发布到 PyPI；请从源码安装。需要 Git、Python 3.10+、venv/pip；执行真实负载的进程管理需要 Linux。
+
+```bash
+git clone https://github.com/asimfish/sim-eval-scale.git
+cd sim-eval-scale
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+RUN_DIR=$(mktemp -d /tmp/sim-eval-scale.XXXXXX)
+python examples/synthetic_demo.py --output "$RUN_DIR/demo"
+sim-eval-scale plan --profile liquid-vision --gpus 4 \
+  --max-envs-per-gpu 64 --output "$RUN_DIR/plan.json"
+```
+
+这些命令不申请云资源，不运行 GPU 仿真。示例输出是合成数据，不是性能或成功率证据。每次使用新输出路径，避免覆盖已有证据。
+
+## 给其他 agent 的入口
+
+把以下指令交给仓库内的 agent：
+
+> 阅读 AGENTS.md、README.md、docs/agent-playbook.md、docs/adapter-protocol.md 和 SECURITY.md。先完成 CPU 快速开始，再核对现有授权 GPU、任务 adapter 和原始验收器。固定模型、场景、种子、输入处理、控制与物理条件，先生成有界 dry plan，再用原始验收通过的产出/GPU 小时选择并发度。保留失败、未知结果和完整证据；未经授权不创建额外云资源。
+
+真实评测需要自己接入已安装的仿真器、模型、资产和 adapter；本项目没有通用 Isaac 任务 adapter。默认需要至少两轮填满并发槽位：四卡、每卡16环境至少需要128个预先固定案例，100条不足以验收该候选。详细安装、结果解释、故障处理与贡献入口见[英文主文档](README.md)。
+
+`SUMMARY.json` 的 `pilot_only=true` 只表示试运行推荐，不代表正式统计等价。评测吞吐包含通过独立审计的真实成功和失败；采集吞吐仅包含原始 Data Gate 验收的唯一合格轨迹。UNKNOWN 必须核实进程关闭后再继续。
+
+问题请提交到 [Issues](https://github.com/asimfish/sim-eval-scale/issues)，附版本、脱敏配置、复现和证据；不要上传凭据或私有数据。贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -1,5 +1,9 @@
 # Sim Eval Scale
 
+[![Tests](https://github.com/asimfish/sim-eval-scale/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/asimfish/sim-eval-scale/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Evidence-gated throughput experiments for simulator evaluation and data collection.
 
 **Four independent worlds per GPU is a tested fallback, not a scaling ceiling.** This project separates GPU count, simulator process count and vectorized environments per process. It helps agents explore independent, vectorized and hybrid execution while retaining original workload acceptance checks.
@@ -17,27 +21,62 @@ Evidence-gated throughput experiments for simulator evaluation and data collecti
 
 **Not bundled:** a universal Isaac task/policy adapter, simulator assets, model weights or cloud credentials. Actual evaluation/collection needs your task adapter and original acceptance oracle. The capacity probe is not a policy success test. There is no claim that1024 fluid/RGB environments have been measured.
 
-## Install and run without a GPU
+## Quick start: no GPU required
+
+Requirements: Git and Python 3.10+ with `venv`/pip. Linux is required for workload subprocess lifecycle control. Install from source; this project has not been released on PyPI.
 
 ```bash
+git clone https://github.com/asimfish/sim-eval-scale.git
+cd sim-eval-scale
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install .
-python -m unittest discover -s tests -v
-python examples/synthetic_demo.py --output /tmp/sim-scale-demo
 
+# Every output path must be new. mktemp makes the example safe to repeat.
+RUN_DIR=$(mktemp -d /tmp/sim-eval-scale.XXXXXX)
+python examples/synthetic_demo.py --output "$RUN_DIR/demo"
 sim-eval-scale plan --profile rigid-state --gpus 1 \
-  --max-envs-per-gpu 1024 --output /tmp/state-plan.json
+  --max-envs-per-gpu 1024 --output "$RUN_DIR/state-plan.json"
 sim-eval-scale plan --profile liquid-vision --gpus 4 \
   --max-envs-per-gpu 64 --max-processes-per-gpu 4 \
-  --output /tmp/liquid-plan.json
+  --output "$RUN_DIR/liquid-plan.json"
 sim-eval-scale sensor-budget --envs 1024 --width 640 --height 480 --hz 15
 sim-eval-scale diagnose examples/profile.json
 ```
 
-Planning creates no simulator or GPU jobs. The synthetic example is labelled synthetic and cannot qualify as actual workload evidence.
+The demo writes `demo/EXAMPLE.json`; plans list candidate topologies. These commands create no simulator or cloud jobs. Synthetic results are explicitly labelled and cannot qualify as actual workload evidence. The source checkout is needed for `examples/` and `docs/`; installing a wheel alone installs the CLI/library.
+
+## Choose your starting point
+
+| Goal | Entry point | Evidence produced |
+| --- | --- | --- |
+| Understand scheduling without hardware | Quick start above | Synthetic example and candidate plans |
+| Integrate an existing task or policy | [Adapter protocol](docs/adapter-protocol.md) | Real task evidence supplied by your adapter |
+| Find a useful concurrency level | Real workload sweeps below | Bounded pilot recommendation, including rejected candidates |
+| Diagnose liquid or RGB bottlenecks | [Tuning matrix](docs/liquid-and-vision.md) | Workload-specific synchronized measurements |
+| Explore camera-free state capacity | Experimental probe below | Capacity diagnostic, not learned-policy success |
+| Hand work to an agent | [Agent playbook](docs/agent-playbook.md), [AGENTS.md](AGENTS.md) | Reproducible manifests, measurements and handoff |
+
+## For coding agents
+
+Give your agent this instruction from the repository checkout:
+
+> Read AGENTS.md, README.md, docs/agent-playbook.md, docs/adapter-protocol.md and SECURITY.md. Run the CPU quick start first. Inspect the existing authorized GPU allocation and task adapter. Freeze the original workload and acceptance criteria; propose a bounded dry plan, then measure accepted output per GPU-hour while retaining all failures and unknown outcomes. Report evidence and limitations. Do not create extra cloud resources without authorization.
+
+No internal workflow service, private host or credentials are needed for the CPU example. A real integration needs your installed simulator, task assets/model, reviewed adapter and existing allocation. Follow host repository rules when embedding this toolkit elsewhere.
 
 ## Real workload sweeps
 
-Implement the [adapter protocol](docs/adapter-protocol.md), freeze a full scene/model-seed manifest and a scientific runtime manifest, then:
+Implement the [adapter protocol](docs/adapter-protocol.md), freeze a full scene/model-seed manifest and a scientific runtime manifest, then run the commands below. Paths marked `/absolute/` are placeholders for your own files, not bundled examples.
+
+Before execution:
+
+1. Bind the allocation to actual physical GPU UUIDs and verify ownership/foreign processes.
+2. Freeze cases, scene/model seeds, checkpoint, input processing, controller, physics and original acceptance oracle. Include adapter source/version in the runtime manifest.
+3. Implement inspection and trial reports, original audit wrappers, hashed correctness evidence and positive worker-closure receipts. Declare only supported topology families.
+4. Include enough cases for at least two full waves at each candidate concurrency. For four GPUs × 16 environments/GPU, that means at least 128 cases; a 100-case roster cannot qualify that candidate under the default wave requirement.
+5. Run two N1 controls and validate input/state/trajectory contracts before selecting a pilot winner. The toolkit checks report integrity; your validators establish scientific correctness.
+
 
 ```bash
 sim-eval-scale policy --plan /absolute/topology-plan.json \
@@ -78,8 +117,41 @@ See [the parameter matrix and diagnostic protocol](docs/liquid-and-vision.md). C
 
 A prior task-specific implementation completed independent-worker learned-policy evaluations with4×96GB GPUs and4 worlds/GPU. Sampled GPU utilization was93–98%, with one completion window around45 cases/hour. This is workload-specific evidence, not a reproducible benchmark package or a universal speedup claim. Aggregate single/multi success rates were close, but strict predeclared statistical equivalence and per-trajectory identity were not established. Private inputs/logs are not distributed.
 
+## Read the results
+
+A sweep creates `PLAN.json`, per-trial requests/logs/reports and `SUMMARY.json`. Inspect the summary's recommendation and stop reason, then retain the full original audits. `pilot_only=true` means the winner still needs a full fixed-cohort evaluation. A larger environment count is useful only when accepted end-to-end throughput improves within correctness and resource limits.
+
+Evaluation throughput counts independently audited completed episodes, including genuine model failures; success rate is reported separately. Collection throughput counts only unique trajectories accepted by the original Data Gate. Infrastructure errors and unknown outcomes must remain visible and cannot be relabelled as model failures or dropped from reporting.
+
+## Troubleshooting
+
+| Symptom | Action |
+| --- | --- |
+| Output already exists | Use a fresh output path; exclusive creation protects earlier evidence. |
+| Candidate skipped for insufficient cases | Increase the predeclared roster or lower concurrency; keep the same roster across compared candidates. |
+| Unsupported topology | Implement and validate that adapter family, or restrict the plan to supported families. |
+| OOM or poor accepted throughput | Reduce density and profile physics, rendering, inference, readback and audit separately. |
+| UNKNOWN or timeout | Reconcile descendant ownership/closure before another execution; do not automatically retry. |
+| Different single/multi observations | Verify camera/light isolation, renderer GPU identity, reset state, RNG and full trajectories using the playbook. |
+| Isaac Lab probe fails on your version | Record SDK versions and a minimal reproduction; the probe is experimental and CPU CI does not validate simulator compatibility. |
+
 ## Development
+
+```bash
+python -m pip install ".[dev]"
+ruff check src tests examples
+ruff format --check src tests examples
+python -m unittest discover -s tests -v
+python examples/synthetic_demo.py --output "$(mktemp -d)/demo"
+```
+
 
 Python3.10+, Linux for process-group lifecycle control. The core has no runtime third-party dependencies. Optional Isaac Lab/PyTorch/Gymnasium come from the user's licensed/version-pinned environment. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [design decision](docs/adr-001-topologies.md).
 
 MIT licensed. No NVIDIA SDK source or assets are redistributed.
+
+## Support and contributions
+
+Use [Issues](https://github.com/asimfish/sim-eval-scale/issues) for reproducible bugs and scoped feature requests. Include the commit, Python/simulator versions, redacted configuration, expected/actual behavior and relevant logs. For performance reports also include topology, hardware, timing method, full denominator and original acceptance evidence. Follow [CONTRIBUTING.md](CONTRIBUTING.md); never publish credentials or private datasets. See [SECURITY.md](SECURITY.md) for sensitive reports and [CHANGELOG.md](CHANGELOG.md) for releases.
+
+The next integration work is task-specific real adapters and reproducible GPU benchmarks for vectorized vision/liquid workloads. These are contributions to validate, not capabilities established by CPU CI.

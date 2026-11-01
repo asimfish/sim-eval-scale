@@ -119,6 +119,88 @@ class KitTests(unittest.TestCase):
                 0.05,
             )
 
+    def test_legacy_levels_honor_process_cap(self):
+        self.policy["max_processes_per_gpu"] = 1
+        with self.assertRaisesRegex(ValueError, "process bound"):
+            a.validate_policy(self.policy)
+
+    def test_timeout_kills_group_even_after_leader_exits(self):
+        import signal
+        import subprocess
+        from unittest.mock import Mock
+
+        child = Mock(pid=12345)
+        child.communicate.side_effect = subprocess.TimeoutExpired("adapter", 1)
+        child.poll.return_value = None
+        child.wait.return_value = 0
+        with (
+            patch.object(a.subprocess, "Popen", return_value=child),
+            patch.object(a.os, "killpg") as killpg,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "CLOSURE_UNKNOWN"):
+                a.invoke(["adapter"], {}, self.root, 1)
+        self.assertEqual(
+            killpg.call_args_list,
+            [unittest.mock.call(12345, signal.SIGTERM), unittest.mock.call(12345, signal.SIGKILL)],
+        )
+
+    def test_real_timeout_removes_sigterm_ignoring_worker(self):
+        import os
+        import signal
+        import time
+
+        code = """import os, signal, time
+from pathlib import Path
+worker = os.fork()
+if worker == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    Path('worker.pid').write_text(str(os.getpid()))
+    while True:
+        time.sleep(1)
+while True:
+    time.sleep(1)
+"""
+        worker = None
+        try:
+            with self.assertRaisesRegex(RuntimeError, "CLOSURE_UNKNOWN"):
+                a.invoke([sys.executable, "-c", code], {}, self.root, 1)
+            worker = int((self.root / "worker.pid").read_text())
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                stat = Path(f"/proc/{worker}/stat")
+                if not stat.exists() or stat.read_text().split(") ", 1)[1].startswith("Z"):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("SIGTERM-ignoring worker still running after adapter timeout")
+        finally:
+            pid_file = self.root / "worker.pid"
+            if worker is None and pid_file.exists():
+                worker = int(pid_file.read_text())
+            if worker is not None:
+                try:
+                    os.kill(worker, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_capacity_probe_records_actual_sdk_versions(self):
+        import runpy
+        import types
+
+        probe = runpy.run_path(
+            str(Path(__file__).parents[1] / "examples/isaaclab_state_benchmark.py")
+        )
+        modules = {
+            "isaaclab": types.SimpleNamespace(__version__="lab-test-version"),
+            "isaacsim.core.version": types.SimpleNamespace(
+                get_version=lambda: ("sim-test", "build")
+            ),
+        }
+        with patch.dict(sys.modules, modules):
+            versions = probe["sdk_versions"]()
+        self.assertEqual(versions["isaaclab_version"], "lab-test-version")
+        self.assertEqual(versions["isaacsim_version"], ("sim-test", "build"))
+
     def test_valid_evidence_and_bounds(self):
         a.validate_policy(self.policy)
         a.validate_report(self.report, self.request, self.policy, self.allocation, self.root)

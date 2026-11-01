@@ -12,6 +12,20 @@ import time
 from pathlib import Path
 
 
+def sdk_versions():
+    """Read installed Lab and running Sim versions; fail rather than guess."""
+    from importlib.metadata import version
+
+    import isaaclab
+    from isaacsim.core.version import get_version
+
+    lab = getattr(isaaclab, "__version__", None) or version("isaaclab")
+    sim = get_version()
+    if not lab or not sim:
+        raise RuntimeError("installed simulator SDK version unavailable")
+    return {"isaaclab_version": str(lab), "isaacsim_version": sim}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", default="Isaac-Cartpole-Direct-v0")
@@ -109,6 +123,7 @@ def main():
             "steady_wall_seconds": wall,
             "environment_steps_per_second": args.steps * args.num_envs / wall,
             "torch_version": torch.__version__,
+            **sdk_versions(),
             "cameras_enabled": False,
             "liquid_task_not_validated": True,
             "torch_peak_allocated_bytes_not_total_Kit_VRAM": torch.cuda.max_memory_allocated(

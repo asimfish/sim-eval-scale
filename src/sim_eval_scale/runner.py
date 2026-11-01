@@ -71,6 +71,12 @@ def validate_policy(p):
             all(type(n) is int and 1 <= n <= p["max_envs_per_gpu"] for n in levels),
             "parallel bound",
         )
+        if "max_processes_per_gpu" in p:
+            cap = p["max_processes_per_gpu"]
+            require(
+                type(cap) is int and cap >= 1 and all(n <= cap for n in levels),
+                "legacy level process bound",
+            )
     ids = p["case_ids"]
     require(ids and len(set(ids)) == len(ids), "fixed unique case roster")
     require(
@@ -302,14 +308,21 @@ def invoke(argv, request, directory, timeout_s):
         except subprocess.TimeoutExpired:
             # This process group was created here. Escaped Native workers remain
             # UNKNOWN; no new trial is scheduled without positive adapter closure.
-            if child.poll() is None:
+            try:
                 os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 child.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                if child.poll() is None:
+                pass
+            finally:
+                # Leader exit does not imply group exit: workers can ignore TERM.
+                try:
                     os.killpg(child.pid, signal.SIGKILL)
-                child.wait(timeout=5)
+                except ProcessLookupError:
+                    pass
+            child.wait(timeout=5)
             raise RuntimeError("adapter_timeout_OWNED_NATIVE_CLOSURE_UNKNOWN_stop_sweep")
     require(child.returncode == 0, "adapter_failed; closure uncertain, stop sweep")
     report = json.loads((directory / "REPORT.json").read_text())

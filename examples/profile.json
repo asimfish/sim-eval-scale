@@ -1,0 +1,14 @@
+{
+  "evidence_kind": "synthetic_example",
+  "timing_method": "synchronized_exclusive_wall",
+  "wall_seconds": 100,
+  "exclusive_seconds": {
+    "startup": 10,
+    "physics": 15,
+    "render": 40,
+    "inference": 15,
+    "readback": 5,
+    "encoding": 5,
+    "audit": 5
+  }
+}

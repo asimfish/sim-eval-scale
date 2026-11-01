@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+runs/
+.env
+.env.*
+*.pt
+*.pth
+*.safetensors
+*.mp4
+*.usd
+*.usda
+*.usdc

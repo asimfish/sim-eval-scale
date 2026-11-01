@@ -21,6 +21,74 @@ Evidence-gated throughput experiments for simulator evaluation and data collecti
 
 **Not bundled:** a universal Isaac task/policy adapter, simulator assets, model weights or cloud credentials. Actual evaluation/collection needs your task adapter and original acceptance oracle. The capacity probe is not a policy success test. There is no claim that1024 fluid/RGB environments have been measured.
 
+## How it works
+
+### 1. From a frozen workload to an evidence-gated recommendation
+
+```mermaid
+flowchart TD
+    F["Frozen cases + scene/model seeds<br/>Checkpoint, camera, controller, physics, oracle"] --> P["plan + policy<br/>Topology candidates and bounded resource/time limits"]
+    P --> D["Dry preview: no simulator or cloud jobs"]
+    D --> X["Explicit execution on an existing authorized allocation"]
+    X --> I["Adapter inspection<br/>Physical GPU identity, ownership, supported families"]
+    I --> B["Two N1 repeat controls<br/>One process and one environment per GPU"]
+    B --> T["Supported candidate trial<br/>Same cases and scientific fingerprint"]
+    T --> A["Task adapter + original validators<br/>Simulation, policy, audits, closure receipts"]
+    A --> G{"Evidence, resource and quality gates pass?"}
+    G -->|No| S["Stop escalation<br/>Retain failures and UNKNOWN; reconcile closure"]
+    G -->|Yes| R["Rank audited output per GPU-hour<br/>External wall time includes startup and drain"]
+    R --> C{"More candidates, budget and useful gain?"}
+    C -->|Yes| T
+    C -->|No| W["SUMMARY.json: pilot-only recommendation"]
+    W --> V["Agent/operator follow-up<br/>Full fixed-cohort evaluation and uncertainty report"]
+```
+
+The adapter runs your real task and validators; the core checks report bindings and evidence integrity. Unsupported or undersized candidates are skipped. A rejection stops the current sweep. The full-cohort follow-up is an agent/operator responsibility, not an automatically executed CLI phase.
+
+### 2. Three different ways to use one GPU
+
+```mermaid
+flowchart TB
+    subgraph I["Independent: processes_per_gpu = 4, envs_per_process = 1"]
+        direction LR
+        I1["Process 1<br/>World 1"]
+        I2["Process 2<br/>World 2"]
+        I3["Process 3<br/>World 3"]
+        I4["Process 4<br/>World 4"]
+    end
+    subgraph V["Vectorized: processes_per_gpu = 1, envs_per_process = 4"]
+        direction LR
+        V1["One process / simulation context<br/>Worlds 1, 2, 3, 4"]
+    end
+    subgraph H["Hybrid: processes_per_gpu = 2, envs_per_process = 2"]
+        direction LR
+        H1["Process 1<br/>Worlds 1, 2"]
+        H2["Process 2<br/>Worlds 3, 4"]
+    end
+```
+
+Each box group is an alternative layout on **one GPU**, not three simultaneous allocations. All have four worlds/GPU, but different startup, memory and isolation costs. Total worlds = GPUs × processes/GPU × worlds/process. Independent-process validation does not establish shared-scene vectorized correctness; each adapter must validate its supported families.
+
+### 3. The agent optimization loop
+
+```mermaid
+flowchart TD
+    M["Measure synchronized phase times<br/>Startup, physics/PBD, render, inference, readback, audit, storage"] --> B{"What limits accepted throughput?"}
+    B --> O["Scheduling and amortization<br/>Private caches, validated resets, batching, bounded async I/O"]
+    B --> F["Scientific/input changes<br/>Particles, solver, dt, camera or render cadence"]
+    F --> N["New versioned scientific configuration<br/>Revalidate original physical and input acceptance"]
+    O --> P["Bounded topology sweep<br/>Two N1 controls + matched candidate trials"]
+    N --> P
+    P --> G{"Original evidence and useful throughput acceptable?"}
+    G -->|No| S["Stop and inspect evidence<br/>Reconcile owned-worker closure before a fresh plan"]
+    S --> M
+    G -->|Yes| V["Full fixed-cohort verification<br/>Success rates, paired disagreements, uncertainty"]
+    V --> D["Measure useful density across authorized GPUs<br/>Keep manifests, audits and final limitations"]
+    D --> M
+```
+
+This loop is guidance for agents, not an autonomous cloud scheduler. Optimize accepted output per GPU-hour; high utilization or lower fidelity alone is not a speedup. See the [agent playbook](docs/agent-playbook.md) for the executable handoff and the [liquid/vision matrix](docs/liquid-and-vision.md) for individual tuning variables.
+
 ## Quick start: no GPU required
 
 Requirements: Git and Python 3.10+ with `venv`/pip. Linux is required for workload subprocess lifecycle control. Install from source; this project has not been released on PyPI.
